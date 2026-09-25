@@ -1,1 +1,21 @@
-[]
+[
+  {
+    "guid": "4720d2bd-83fc-46c3-84ca-3ae264678a17",
+    "name": "PDB Controller",
+    "description": "Holds a Kubernetes PodDisruptionBudget while selected scheduled tasks run or selected users stream.",
+    "overview": "Hold a PodDisruptionBudget while Jellyfin is busy",
+    "owner": "casa-de-blanco",
+    "category": "General",
+    "imageUrl": null,
+    "versions": [
+      {
+        "version": "0.1.0.0",
+        "changelog": "Initial release.",
+        "targetAbi": "12.1.0.0",
+        "sourceUrl": "https://github.com/casa-de-blanco/jellyfin-plugin-pdb-controller/releases/download/v0.1.0.0/pdb-controller-0.1.0.0.zip",
+        "checksum": "8a73610f497d50ccc9ab7f623e768903",
+        "timestamp": "2026-09-25T03:44:40Z"
+      }
+    ]
+  }
+]
