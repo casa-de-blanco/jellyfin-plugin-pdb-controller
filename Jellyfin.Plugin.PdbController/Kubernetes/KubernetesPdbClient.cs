@@ -83,16 +83,18 @@ public sealed class KubernetesPdbClient : IKubernetesPdbClient, IDisposable
         using var document = await JsonDocument.ParseAsync(body, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
+        var heldSince = ReadHeldSince(document.RootElement);
+
         if (!document.RootElement.TryGetProperty("spec", out var spec))
         {
-            return new PdbState(null, false);
+            return new PdbState(null, false, heldSince);
         }
 
         var usesMaxUnavailable = spec.TryGetProperty("maxUnavailable", out _);
 
         if (!spec.TryGetProperty("minAvailable", out var minAvailable))
         {
-            return new PdbState(null, usesMaxUnavailable);
+            return new PdbState(null, usesMaxUnavailable, heldSince);
         }
 
         // minAvailable is an IntOrString, so it is legitimately either. A percentage
@@ -100,13 +102,13 @@ public sealed class KubernetesPdbClient : IKubernetesPdbClient, IDisposable
         // "not a budget I understand" rather than guessing.
         return minAvailable.ValueKind switch
         {
-            JsonValueKind.Number => new PdbState(minAvailable.GetInt32(), usesMaxUnavailable),
+            JsonValueKind.Number => new PdbState(minAvailable.GetInt32(), usesMaxUnavailable, heldSince),
             JsonValueKind.String when int.TryParse(
                 minAvailable.GetString(),
                 NumberStyles.Integer,
                 CultureInfo.InvariantCulture,
-                out var parsed) => new PdbState(parsed, usesMaxUnavailable),
-            _ => new PdbState(null, usesMaxUnavailable),
+                out var parsed) => new PdbState(parsed, usesMaxUnavailable, heldSince),
+            _ => new PdbState(null, usesMaxUnavailable, heldSince),
         };
     }
 
@@ -148,6 +150,29 @@ public sealed class KubernetesPdbClient : IKubernetesPdbClient, IDisposable
 
     /// <inheritdoc />
     public void Dispose() => _httpClient?.Dispose();
+
+    /// <summary>
+    /// Reads the hold-since stamp off the object, if this plugin left one there.
+    /// </summary>
+    private static DateTimeOffset? ReadHeldSince(JsonElement root)
+    {
+        if (!root.TryGetProperty("metadata", out var metadata)
+            || !metadata.TryGetProperty("annotations", out var annotations)
+            || annotations.ValueKind != JsonValueKind.Object
+            || !annotations.TryGetProperty(HoldSinceAnnotation, out var since)
+            || since.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        return DateTimeOffset.TryParse(
+            since.GetString(),
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.RoundtripKind,
+            out var parsed)
+            ? parsed
+            : null;
+    }
 
     private static string BuildPath(string namespaceName, string name) =>
         FormattableString.Invariant(

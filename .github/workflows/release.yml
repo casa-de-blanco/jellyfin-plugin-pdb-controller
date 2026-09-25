@@ -38,6 +38,9 @@ jobs:
             exit 1
           }
 
+      - name: Test
+        run: dotnet test Jellyfin.Plugin.PdbController.Tests/Jellyfin.Plugin.PdbController.Tests.csproj
+
       - name: Build
         run: |
           V='${{ inputs.version }}'

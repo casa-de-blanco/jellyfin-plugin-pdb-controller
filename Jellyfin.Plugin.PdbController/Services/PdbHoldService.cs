@@ -237,7 +237,37 @@ public sealed class PdbHoldService : IHostedService, IDisposable
                     $"{namespaceName}/{config.PdbName} is expressed with maxUnavailable; refusing to patch minAvailable onto it."));
         }
 
-        var desired = DecideDesired(config, state, wantHold, holdingTasks, streamingUsers, now);
+        // Adopt the stamp the object carries, so a restart during a genuine hold does
+        // not restart the maximum-hold clock -- otherwise a long scan could outlast
+        // the cap forever by being restarted through it. Only when the hold is still
+        // wanted: adopting a stale stamp left by a killed process would make this
+        // process treat that hold as its own, and the release below is the whole
+        // point of the startup pass.
+        if (wantHold)
+        {
+            _heldSince ??= state.HeldSince;
+        }
+
+        var decision = HoldPolicy.Decide(
+            wantHold,
+            state.MinAvailable,
+            new HoldState(_heldSince, _clearedAt, _forceReleased),
+            TimeSpan.FromSeconds(Math.Max(0, config.GracePeriodSeconds)),
+            TimeSpan.FromMinutes(Math.Max(1, config.MaxHoldMinutes)),
+            now);
+
+        if (decision.BrokeHold)
+        {
+            _logger.LogWarning(
+                "Breaking a hold that has lasted {Elapsed} (limit {Limit} minutes); still holding: {Reason}. "
+                + "Releasing so node drains and upgrades can proceed.",
+                now - (_heldSince ?? now),
+                config.MaxHoldMinutes,
+                Describe(holdingTasks, streamingUsers));
+        }
+
+        _forceReleased = decision.ForceReleased;
+        var desired = decision.MinAvailable;
 
         if (state.MinAvailable == desired)
         {
@@ -280,52 +310,6 @@ public sealed class PdbHoldService : IHostedService, IDisposable
             state.MinAvailable?.ToString(CultureInfo.InvariantCulture) ?? "unset",
             desired,
             reason);
-    }
-
-    private int DecideDesired(
-        PluginConfiguration config,
-        PdbState state,
-        bool wantHold,
-        IReadOnlyList<string> holdingTasks,
-        IReadOnlyList<string> streamingUsers,
-        DateTimeOffset now)
-    {
-        if (!wantHold)
-        {
-            // Release is delayed; taking the hold is not. A paused film or a client
-            // reconnecting should not flap the budget.
-            var grace = TimeSpan.FromSeconds(Math.Max(0, config.GracePeriodSeconds));
-            if (_clearedAt is { } cleared && now - cleared < grace)
-            {
-                _logger.LogDebug("Within the grace period; keeping minAvailable at {Value}.", state.MinAvailable ?? 0);
-                return state.MinAvailable ?? 0;
-            }
-
-            return 0;
-        }
-
-        if (_forceReleased)
-        {
-            // The latch is the whole point of a maximum hold. Without it the next
-            // tick sees the same running task, re-holds, and the cap means nothing.
-            return 0;
-        }
-
-        var maxHold = TimeSpan.FromMinutes(Math.Max(1, config.MaxHoldMinutes));
-        if (state.MinAvailable == 1 && _heldSince is { } since && now - since > maxHold)
-        {
-            _logger.LogWarning(
-                "Breaking a hold that has lasted {Elapsed} (limit {Limit}); still holding: {Reason}. "
-                + "The budget is being released so node drains and upgrades can proceed.",
-                now - since,
-                maxHold,
-                Describe(holdingTasks, streamingUsers));
-
-            _forceReleased = true;
-            return 0;
-        }
-
-        return 1;
     }
 
     private List<string> RunningSelectedTasks(PluginConfiguration config)

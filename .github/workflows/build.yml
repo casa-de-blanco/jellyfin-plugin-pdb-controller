@@ -20,3 +20,6 @@ jobs:
       # keeps an analyser failure out of a release rather than into one.
       - name: Build
         run: dotnet build Jellyfin.Plugin.PdbController/Jellyfin.Plugin.PdbController.csproj -c Release
+
+      - name: Test
+        run: dotnet test Jellyfin.Plugin.PdbController.Tests/Jellyfin.Plugin.PdbController.Tests.csproj
