@@ -9,6 +9,14 @@
     "imageUrl": null,
     "versions": [
       {
+        "version": "0.1.1.0",
+        "changelog": "Release a stale hold on startup instead of waiting out the grace period; read the hold-since annotation back so a restart does not reset the maximum-hold clock.",
+        "targetAbi": "12.1.0.0",
+        "sourceUrl": "https://github.com/casa-de-blanco/jellyfin-plugin-pdb-controller/releases/download/v0.1.1.0/pdb-controller-0.1.1.0.zip",
+        "checksum": "030ef479a901737884fd207136fe8664",
+        "timestamp": "2026-09-25T03:50:05Z"
+      },
+      {
         "version": "0.1.0.0",
         "changelog": "Initial release.",
         "targetAbi": "12.1.0.0",
