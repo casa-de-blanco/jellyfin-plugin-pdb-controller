@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>PDB Controller</title>
+</head>
+<body>
+<div id="pdbControllerConfigPage" data-role="page" class="page type-interior pluginConfigurationPage">
+    <div data-role="content">
+        <div class="content-primary">
+            <form id="pdbControllerConfigForm">
+                <div class="verticalSection">
+                    <h2 class="sectionTitle">PDB Controller</h2>
+                    <p class="fieldDescription">
+                        Holds a Kubernetes PodDisruptionBudget open while Jellyfin is busy, so a node
+                        drain or a cluster upgrade waits instead of interrupting it. This only affects
+                        evictions &mdash; it does not stop a rolling update or a scale&#8209;to&#8209;zero.
+                    </p>
+                </div>
+
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label class="emby-checkbox-label">
+                        <input id="pdbEnabled" name="pdbEnabled" type="checkbox" is="emby-checkbox" />
+                        <span>Enable</span>
+                    </label>
+                </div>
+
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="pdbName">Budget name</label>
+                    <input id="pdbName" name="pdbName" type="text" is="emby-input" />
+                    <div class="fieldDescription">
+                        The PodDisruptionBudget to toggle. It must already exist &mdash; this plugin
+                        never creates or deletes one.
+                    </div>
+                </div>
+
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="pdbNamespace">Namespace</label>
+                    <input id="pdbNamespace" name="pdbNamespace" type="text" is="emby-input" />
+                    <div class="fieldDescription">Leave empty to use the namespace this pod runs in.</div>
+                </div>
+
+                <div class="verticalSection">
+                    <h3 class="sectionTitle">Scheduled tasks</h3>
+                    <p class="fieldDescription">
+                        Hold the budget while any of these are running.
+                    </p>
+                    <div class="checkboxContainer">
+                        <label class="emby-checkbox-label">
+                            <input id="pdbAllTasks" type="checkbox" is="emby-checkbox" />
+                            <span><strong>All scheduled tasks</strong></span>
+                        </label>
+                    </div>
+                    <p class="fieldDescription">
+                        With this on, a task added later by a plugin or a server upgrade is covered
+                        automatically, and the individual choices below are kept for when you turn it
+                        back off.
+                    </p>
+                    <div id="pdbTaskList" class="checkboxList paperList" style="padding: 0.5em 1em;"></div>
+                    <div class="checkboxContainer">
+                        <label class="emby-checkbox-label">
+                            <input id="pdbShowHiddenTasks" type="checkbox" is="emby-checkbox" />
+                            <span>Also list hidden tasks</span>
+                        </label>
+                    </div>
+                    <p class="fieldDescription">
+                        Hidden tasks still run, and a long one is still worth protecting.
+                    </p>
+                </div>
+
+                <div class="verticalSection">
+                    <h3 class="sectionTitle">Streaming users</h3>
+                    <p class="fieldDescription">
+                        Hold the budget while any of these users is playing something. A client that
+                        is merely connected and idle does not count; a paused stream does.
+                    </p>
+                    <div class="checkboxContainer">
+                        <label class="emby-checkbox-label">
+                            <input id="pdbAnyUser" type="checkbox" is="emby-checkbox" />
+                            <span><strong>Any user</strong></span>
+                        </label>
+                    </div>
+                    <div id="pdbUserList" class="checkboxList paperList" style="padding: 0.5em 1em;"></div>
+                </div>
+
+                <div class="verticalSection">
+                    <h3 class="sectionTitle">Timing</h3>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="pdbGrace">Grace period (seconds)</label>
+                        <input id="pdbGrace" type="number" is="emby-input" min="0" step="10" />
+                        <div class="fieldDescription">
+                            How long to wait after the last stream or task ends before releasing, so a
+                            pause or a reconnect does not flap the budget.
+                        </div>
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="pdbMaxHold">Maximum hold (minutes)</label>
+                        <input id="pdbMaxHold" type="number" is="emby-input" min="1" step="10" />
+                        <div class="fieldDescription">
+                            A hold is broken after this long, with a warning in the log. Without a cap a
+                            wedged task or a session that was never reaped blocks node drains and
+                            upgrades indefinitely.
+                        </div>
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="pdbInterval">Reconcile interval (seconds)</label>
+                        <input id="pdbInterval" type="number" is="emby-input" min="5" step="5" />
+                        <div class="fieldDescription">
+                            The backstop. Playback and task events are acted on immediately; this is
+                            what recovers the state if one of them is ever missed.
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                        <span>Save</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+        (function () {
+            var pluginId = '4720d2bd-83fc-46c3-84ca-3ae264678a17';
+            var page;
+
+            // Names come from users and from third-party plugins, so they are set as
+            // text and never as markup.
+            function renderList(container, items, selected, idOf, labelOf, subtitleOf) {
+                container.innerHTML = '';
+
+                if (!items.length) {
+                    var empty = document.createElement('div');
+                    empty.className = 'fieldDescription';
+                    empty.textContent = 'Nothing to show.';
+                    container.appendChild(empty);
+                    return;
+                }
+
+                items.forEach(function (item) {
+                    var id = idOf(item);
+                    var row = document.createElement('div');
+                    row.className = 'checkboxContainer';
+
+                    var label = document.createElement('label');
+                    label.className = 'emby-checkbox-label';
+
+                    var input = document.createElement('input');
+                    input.type = 'checkbox';
+                    input.setAttribute('is', 'emby-checkbox');
+                    input.setAttribute('data-key', id);
+                    input.checked = selected.indexOf(id) !== -1;
+
+                    var span = document.createElement('span');
+                    var subtitle = subtitleOf ? subtitleOf(item) : '';
+                    span.textContent = subtitle ? labelOf(item) + ' — ' + subtitle : labelOf(item);
+
+                    label.appendChild(input);
+                    label.appendChild(span);
+                    row.appendChild(label);
+                    container.appendChild(row);
+                });
+            }
+
+            function applyMaster(masterId, containerId) {
+                var master = page.querySelector(masterId);
+                var inputs = page.querySelectorAll(containerId + ' input[type=checkbox]');
+                for (var i = 0; i < inputs.length; i++) {
+                    inputs[i].disabled = master.checked;
+                }
+            }
+
+            // The per-item selection is read back from the DOM even while the master
+            // is on, which is what makes turning the master off restore it instead of
+            // wiping it.
+            function collect(containerId) {
+                var keys = [];
+                var inputs = page.querySelectorAll(containerId + ' input[type=checkbox]');
+                for (var i = 0; i < inputs.length; i++) {
+                    if (inputs[i].checked) {
+                        keys.push(inputs[i].getAttribute('data-key'));
+                    }
+                }
+
+                return keys;
+            }
+
+            function loadTasks(config) {
+                var showHidden = page.querySelector('#pdbShowHiddenTasks').checked;
+                var url = ApiClient.getUrl('ScheduledTasks', showHidden ? {} : { isHidden: false });
+
+                return ApiClient.getJSON(url).then(function (tasks) {
+                    tasks.sort(function (a, b) {
+                        return (a.Name || '').localeCompare(b.Name || '');
+                    });
+
+                    renderList(
+                        page.querySelector('#pdbTaskList'),
+                        tasks,
+                        config.TaskKeys || [],
+                        function (t) { return t.Key; },
+                        function (t) { return t.Name || t.Key; },
+                        function (t) { return t.Category || ''; });
+
+                    applyMaster('#pdbAllTasks', '#pdbTaskList');
+                });
+            }
+
+            function loadUsers(config) {
+                return ApiClient.getUsers().then(function (users) {
+                    renderList(
+                        page.querySelector('#pdbUserList'),
+                        users,
+                        config.UserIds || [],
+                        function (u) { return u.Id; },
+                        function (u) { return u.Name; },
+                        null);
+
+                    applyMaster('#pdbAnyUser', '#pdbUserList');
+                });
+            }
+
+            function load() {
+                Dashboard.showLoadingMsg();
+
+                return ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    page.querySelector('#pdbEnabled').checked = config.Enabled;
+                    page.querySelector('#pdbName').value = config.PdbName || '';
+                    page.querySelector('#pdbNamespace').value = config.Namespace || '';
+                    page.querySelector('#pdbAllTasks').checked = config.AllTasks;
+                    page.querySelector('#pdbAnyUser').checked = config.AnyUser;
+                    page.querySelector('#pdbGrace').value = config.GracePeriodSeconds;
+                    page.querySelector('#pdbMaxHold').value = config.MaxHoldMinutes;
+                    page.querySelector('#pdbInterval').value = config.ReconcileIntervalSeconds;
+
+                    return Promise.all([loadTasks(config), loadUsers(config)]).then(function () {
+                        Dashboard.hideLoadingMsg();
+                    });
+                }).catch(function (err) {
+                    Dashboard.hideLoadingMsg();
+                    throw err;
+                });
+            }
+
+            document.querySelector('#pdbControllerConfigPage').addEventListener('pageshow', function () {
+                page = this;
+
+                page.querySelector('#pdbAllTasks').addEventListener('change', function () {
+                    applyMaster('#pdbAllTasks', '#pdbTaskList');
+                });
+
+                page.querySelector('#pdbAnyUser').addEventListener('change', function () {
+                    applyMaster('#pdbAnyUser', '#pdbUserList');
+                });
+
+                page.querySelector('#pdbShowHiddenTasks').addEventListener('change', function () {
+                    ApiClient.getPluginConfiguration(pluginId).then(loadTasks);
+                });
+
+                load();
+            });
+
+            document.querySelector('#pdbControllerConfigForm').addEventListener('submit', function (e) {
+                e.preventDefault();
+                Dashboard.showLoadingMsg();
+
+                ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    config.Enabled = page.querySelector('#pdbEnabled').checked;
+                    config.PdbName = page.querySelector('#pdbName').value.trim();
+                    config.Namespace = page.querySelector('#pdbNamespace').value.trim();
+                    config.AllTasks = page.querySelector('#pdbAllTasks').checked;
+                    config.AnyUser = page.querySelector('#pdbAnyUser').checked;
+                    config.TaskKeys = collect('#pdbTaskList');
+                    config.UserIds = collect('#pdbUserList');
+                    config.GracePeriodSeconds = parseInt(page.querySelector('#pdbGrace').value, 10);
+                    config.MaxHoldMinutes = parseInt(page.querySelector('#pdbMaxHold').value, 10);
+                    config.ReconcileIntervalSeconds = parseInt(page.querySelector('#pdbInterval').value, 10);
+
+                    ApiClient.updatePluginConfiguration(pluginId, config).then(function (result) {
+                        Dashboard.processPluginConfigurationUpdateResult(result);
+                    });
+                });
+
+                return false;
+            });
+        })();
+    </script>
+</div>
+</body>
+</html>

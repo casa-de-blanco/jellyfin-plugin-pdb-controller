@@ -1,0 +1,15 @@
+---
+name: "PDB Controller"
+guid: "4720d2bd-83fc-46c3-84ca-3ae264678a17"
+version: "0.1.0.0"
+targetAbi: "12.1.0.0"
+framework: "net10.0"
+owner: "casa-de-blanco"
+overview: "Hold a PodDisruptionBudget while Jellyfin is busy"
+description: >
+  Holds a Kubernetes PodDisruptionBudget open while selected scheduled tasks are
+  running or selected users are streaming, so a node drain or a cluster upgrade
+  waits instead of interrupting playback.
+category: "General"
+artifacts:
+  - "Jellyfin.Plugin.PdbController.dll"

@@ -1,0 +1,113 @@
+---
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Four-part version, e.g. 0.1.0.0"
+        required: true
+      changelog:
+        description: "One line for the plugin catalogue"
+        required: false
+        default: ""
+
+# Two runs would race the manifest.json commit.
+concurrency:
+  group: release
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Validate version
+        run: |
+          echo "${{ inputs.version }}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || {
+            echo "Version must have four parts -- Jellyfin parses it with System.Version." >&2
+            exit 1
+          }
+
+      - name: Build
+        run: |
+          V='${{ inputs.version }}'
+          dotnet build Jellyfin.Plugin.PdbController/Jellyfin.Plugin.PdbController.csproj \
+            -c Release -p:Version="$V" -p:AssemblyVersion="$V" -p:FileVersion="$V"
+
+      # Only the DLL. Jellyfin writes meta.json itself from the repository entry
+      # when it installs, so there is nothing else to ship.
+      - name: Package
+        id: package
+        run: |
+          V='${{ inputs.version }}'
+          ZIP="pdb-controller-$V.zip"
+          zip -j "$ZIP" \
+            Jellyfin.Plugin.PdbController/bin/Release/net10.0/Jellyfin.Plugin.PdbController.dll
+          echo "zip=$ZIP" >>"$GITHUB_OUTPUT"
+          echo "checksum=$(md5sum "$ZIP" | cut -d' ' -f1)" >>"$GITHUB_OUTPUT"
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ inputs.version }}" "${{ steps.package.outputs.zip }}" \
+            --title "v${{ inputs.version }}" --generate-notes
+
+      - name: Update manifest
+        env:
+          VERSION: ${{ inputs.version }}
+          CHECKSUM: ${{ steps.package.outputs.checksum }}
+          ZIP: ${{ steps.package.outputs.zip }}
+          CHANGELOG: ${{ inputs.changelog }}
+        run: |
+          SOURCE_URL="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/${ZIP}"
+          # Newest first: that is the order the plugin catalogue reads.
+          jq --arg guid "4720d2bd-83fc-46c3-84ca-3ae264678a17" \
+             --arg version "$VERSION" \
+             --arg changelog "$CHANGELOG" \
+             --arg checksum "$CHECKSUM" \
+             --arg sourceUrl "$SOURCE_URL" \
+             --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+             '
+             def entry: {
+               version: $version,
+               changelog: $changelog,
+               targetAbi: "12.1.0.0",
+               sourceUrl: $sourceUrl,
+               checksum: $checksum,
+               timestamp: $timestamp
+             };
+             if (map(select(.guid == $guid)) | length) == 0 then
+               . + [{
+                 guid: $guid,
+                 name: "PDB Controller",
+                 description: "Holds a Kubernetes PodDisruptionBudget while selected scheduled tasks run or selected users stream.",
+                 overview: "Hold a PodDisruptionBudget while Jellyfin is busy",
+                 owner: "casa-de-blanco",
+                 category: "General",
+                 imageUrl: null,
+                 versions: [entry]
+               }]
+             else
+               map(if .guid == $guid then .versions = ([entry] + .versions) else . end)
+             end
+             ' manifest.json >manifest.json.new
+          mv manifest.json.new manifest.json
+
+      - name: Commit manifest
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add manifest.json
+          git commit -m "chore: publish v${{ inputs.version }}"
+          git push origin HEAD:main

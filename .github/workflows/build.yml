@@ -1,0 +1,22 @@
+---
+name: build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      # The project builds with TreatWarningsAsErrors, so this is the gate that
+      # keeps an analyser failure out of a release rather than into one.
+      - name: Build
+        run: dotnet build Jellyfin.Plugin.PdbController/Jellyfin.Plugin.PdbController.csproj -c Release

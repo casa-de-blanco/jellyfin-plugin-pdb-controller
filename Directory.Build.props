@@ -1,0 +1,12 @@
+<Project>
+  <PropertyGroup>
+    <!-- CI overrides all three on the command line. They agree on purpose: the
+         plugin manager compares the assembly version against the version in the
+         repository manifest and rewrites meta.json when they disagree. -->
+    <Version>0.0.0.0</Version>
+    <AssemblyVersion>0.0.0.0</AssemblyVersion>
+    <FileVersion>0.0.0.0</FileVersion>
+    <Company>casa-de-blanco</Company>
+    <Product>Jellyfin PDB Controller</Product>
+  </PropertyGroup>
+</Project>
