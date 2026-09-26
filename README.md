@@ -69,6 +69,20 @@ rules:
 `list` is deliberately absent — `resourceNames` cannot scope it, and the plugin only ever
 reads the budget it is about to write.
 
+All of that — the budget, the Role and the RoleBinding — is packaged as a chart in
+[`charts/jellyfin-pdb-controller`](charts/jellyfin-pdb-controller), published as an OCI
+artifact:
+
+```console
+helm install jellyfin-pdb oci://ghcr.io/casa-de-blanco/charts/jellyfin-pdb-controller \
+  --version 0.1.0 -n media
+```
+
+It deploys no Jellyfin of its own; install it into the namespace whatever chart does that
+is using. Note it renders the budget with **no** `minAvailable` at all: the field belongs
+to the plugin, and Helm's three-way merge would otherwise reset a live hold on every
+upgrade. The chart README has the reasoning and the values.
+
 Two things that are easy to miss:
 
 - **The token has to actually be mounted.** Several Helm charts (bjw-s `app-template`

@@ -1,0 +1,65 @@
+---
+# The name of the PodDisruptionBudget. This is the one value that has to agree
+# with the plugin: it is `PdbName` on the plugin's configuration page, which
+# defaults to `jellyfin` as well. It feeds both the budget's own name and the
+# Role's `resourceNames`, so those two can never drift apart.
+pdbName: jellyfin
+
+pdb:
+  # Which pods the budget covers. The default matches what every mainstream
+  # Jellyfin chart labels its pods with.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: jellyfin
+
+  # Left null on purpose, and this is the interesting decision in the chart.
+  #
+  # The plugin owns this field at runtime -- it patches it to 1 while a
+  # selected scheduled task runs or a selected user streams, and back to 0
+  # once that clears. Helm's three-way merge only reconciles fields that
+  # appear in the old or the new manifest, so a chart that rendered
+  # `minAvailable: 0` would stamp over a live hold on every `helm upgrade`,
+  # briefly opening a drain window mid-film. Rendering nothing leaves the
+  # field to its owner.
+  #
+  # A budget with neither `minAvailable` nor `maxUnavailable` computes
+  # desiredHealthy 0 and allows disruptions, i.e. it fails open -- exactly
+  # what an explicit 0 would do -- and the plugin writes the real value on its
+  # first reconcile, which happens at startup before any event can arrive.
+  #
+  # Set it only if you want the resting state pinned by hand, and only if you
+  # accept an upgrade resetting a hold.
+  minAvailable: null
+  maxUnavailable: null
+
+  # A crashlooping Jellyfin must never be able to wedge a drain: without this,
+  # an unhealthy pod under a held budget is unevictable and the drain burns
+  # its whole timeout for nothing.
+  unhealthyPodEvictionPolicy: AlwaysAllow
+
+  annotations: {}
+  labels: {}
+
+rbac:
+  # The Role and RoleBinding granting the plugin `get` and `patch` on the one
+  # budget. Turn this off only if you bind the permission yourself.
+  create: true
+  annotations: {}
+
+serviceAccount:
+  # Off by default: in a normal deployment the Jellyfin chart already creates
+  # the account its pod runs as, and this chart only needs to name it.
+  create: false
+  # The account the Jellyfin pod runs as. The RoleBinding's subject.
+  name: jellyfin
+  annotations: {}
+
+# Extra labels put on every object in this chart.
+commonLabels: {}
+# Extra annotations put on every object in this chart.
+commonAnnotations: {}
+
+# Full name override, affecting the Role/RoleBinding names only -- the budget
+# is named by `pdbName`, because the plugin has to be able to find it.
+nameOverride: ""
+fullnameOverride: ""

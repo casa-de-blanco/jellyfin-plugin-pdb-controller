@@ -1,0 +1,35 @@
+{{ .Chart.Name }} {{ .Chart.Version }} installed as {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+PodDisruptionBudget: {{ .Values.pdbName }}
+  selector: {{ .Values.pdb.selector.matchLabels | toJson }}
+{{- if kindIs "invalid" .Values.pdb.minAvailable }}
+  minAvailable: not set -- the plugin writes it on its first reconcile.
+{{- else }}
+  minAvailable: {{ .Values.pdb.minAvailable }} (pinned by hand; a helm upgrade will
+  reset a hold that is live at the time)
+{{- end }}
+{{- if .Values.rbac.create }}
+RBAC: get + patch on that one budget, bound to ServiceAccount {{ include "jellyfin-pdb-controller.serviceAccountName" . }}.
+{{- else }}
+RBAC: not created -- bind get + patch on poddisruptionbudgets/{{ .Values.pdbName }} yourself.
+{{- end }}
+
+Three things this chart cannot do for you:
+
+1. Install it into Jellyfin's own namespace. The plugin reads the namespace out
+   of its service account directory, and a Role only binds within one.
+
+2. Mount the token. Several charts (bjw-s app-template among them) default the
+   pod-level automountServiceAccountToken to false. The account existing is not
+   enough -- with no token file the plugin logs once and stays idle:
+
+     controllers.main.pod.automountServiceAccountToken: true
+
+3. Keep your GitOps controller off spec.minAvailable. Under ArgoCD that is an
+   ignoreDifferences entry *and* RespectIgnoreDifferences=true -- the first
+   hides the diff, the second is what stops a sync writing over a live hold.
+
+Check a hold with:
+
+  kubectl get pdb -n {{ .Release.Namespace }} {{ .Values.pdbName }} \
+    -o jsonpath='{.spec.minAvailable}{"\t"}{.metadata.annotations}'

@@ -1,0 +1,29 @@
+{{- if .Values.rbac.create }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "jellyfin-pdb-controller.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "jellyfin-pdb-controller.labels" . | nindent 4 }}
+  {{- $ann := merge (dict) .Values.rbac.annotations .Values.commonAnnotations }}
+  {{- with $ann }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+rules:
+  # As narrow as the API allows: the plugin reads and toggles exactly one
+  # object and never creates or deletes one, so the grant is namespaced and
+  # name-scoped. `list` is absent on purpose -- resourceNames cannot scope a
+  # list, and the plugin only ever GETs the budget it is about to patch.
+  - apiGroups:
+      - policy
+    resources:
+      - poddisruptionbudgets
+    resourceNames:
+      - {{ .Values.pdbName }}
+    verbs:
+      - get
+      - patch
+{{- end }}
