@@ -1,0 +1,26 @@
+{{- if .Values.rbac.create }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "jellyfin-pdb-controller.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "jellyfin-pdb-controller.labels" . | nindent 4 }}
+  {{- $ann := merge (dict) .Values.rbac.annotations .Values.commonAnnotations }}
+  {{- with $ann }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "jellyfin-pdb-controller.fullname" . }}
+subjects:
+  # The account the Jellyfin pod runs as, which this chart does not normally
+  # own. It must live in this namespace: a Role can only be bound within one,
+  # and the plugin reads the budget from the namespace it is running in.
+  - kind: ServiceAccount
+    name: {{ include "jellyfin-pdb-controller.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

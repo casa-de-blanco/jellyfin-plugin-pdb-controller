@@ -1,0 +1,36 @@
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  # Not prefixed with the release name: the plugin resolves the budget by the
+  # name configured on its settings page (`PdbName`, default `jellyfin`), and
+  # the Role below scopes `resourceNames` to the same value.
+  name: {{ .Values.pdbName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "jellyfin-pdb-controller.labels" . | nindent 4 }}
+    {{- with .Values.pdb.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- $ann := merge (dict) .Values.pdb.annotations .Values.commonAnnotations }}
+  {{- with $ann }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- /*
+    Only rendered when explicitly set. The plugin owns minAvailable at
+    runtime and an upgrade that re-asserted it would drop a live hold.
+    See the comment on pdb.minAvailable in values.yaml.
+  */}}
+  {{- if kindIs "invalid" .Values.pdb.minAvailable | not }}
+  minAvailable: {{ .Values.pdb.minAvailable }}
+  {{- end }}
+  {{- if kindIs "invalid" .Values.pdb.maxUnavailable | not }}
+  maxUnavailable: {{ .Values.pdb.maxUnavailable }}
+  {{- end }}
+  {{- with .Values.pdb.unhealthyPodEvictionPolicy }}
+  unhealthyPodEvictionPolicy: {{ . }}
+  {{- end }}
+  selector:
+    {{- toYaml .Values.pdb.selector | nindent 4 }}

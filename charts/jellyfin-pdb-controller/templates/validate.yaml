@@ -1,0 +1,8 @@
+{{- /*
+  Fail the render rather than the apply. The API server rejects a budget that
+  carries both fields, and it does so at apply time -- by which point a
+  `helm upgrade` has already got half way through.
+*/ -}}
+{{- if and (kindIs "invalid" .Values.pdb.minAvailable | not) (kindIs "invalid" .Values.pdb.maxUnavailable | not) }}
+{{- fail "pdb.minAvailable and pdb.maxUnavailable are mutually exclusive -- set at most one, and preferably neither (the plugin owns minAvailable)." }}
+{{- end }}

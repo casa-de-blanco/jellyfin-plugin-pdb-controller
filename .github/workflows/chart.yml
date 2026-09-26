@@ -1,0 +1,122 @@
+---
+name: chart
+
+on:
+  pull_request:
+    paths:
+      - "charts/**"
+      - ".github/workflows/chart.yml"
+  push:
+    branches: [main]
+    paths:
+      - "charts/**"
+      - ".github/workflows/chart.yml"
+  workflow_dispatch:
+
+env:
+  CHART_DIR: charts/jellyfin-pdb-controller
+  # `helm push` appends the chart name, so this is the namespace, not the repo.
+  OCI_REPO: oci://ghcr.io/casa-de-blanco/charts
+
+concurrency:
+  group: chart-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.22.0
+
+      - name: Lint
+        run: helm lint "$CHART_DIR"
+
+      # Defaults plus the two shapes that are easy to get wrong: the budget
+      # with minAvailable pinned by hand, and RBAC turned off.
+      - name: Template
+        run: |
+          helm template t "$CHART_DIR" -n media >/dev/null
+          helm template t "$CHART_DIR" -n media --set pdb.minAvailable=1 >/dev/null
+          helm template t "$CHART_DIR" -n media --set rbac.create=false >/dev/null
+
+      # The mutual-exclusion guard fails the render, so a regression here is a
+      # template that succeeds.
+      - name: Reject minAvailable + maxUnavailable
+        run: |
+          if helm template t "$CHART_DIR" -n media \
+               --set pdb.minAvailable=1 --set pdb.maxUnavailable=1 >/dev/null 2>&1; then
+            echo "expected the render to fail with both fields set" >&2
+            exit 1
+          fi
+
+      - name: Install kubeconform
+        run: |
+          curl -fsSL -o /tmp/kubeconform.tar.gz \
+            https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz
+          tar -xzf /tmp/kubeconform.tar.gz -C /tmp kubeconform
+          sudo install /tmp/kubeconform /usr/local/bin/kubeconform
+
+      - name: Validate
+        run: helm template t "$CHART_DIR" -n media | kubeconform -strict -summary -
+
+  publish:
+    # Only from main. A PR from a fork could not authenticate anyway, but this
+    # keeps a PR run from ever reaching the registry.
+    if: github.event_name != 'pull_request'
+    needs: lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.22.0
+
+      - name: Read version
+        id: chart
+        run: |
+          V="$(helm show chart "$CHART_DIR" | awk '$1 == "version:" { print $2; exit }')"
+          [ -n "$V" ] || { echo "no version in Chart.yaml" >&2; exit 1; }
+          echo "version=$V" >>"$GITHUB_OUTPUT"
+
+      - name: Log in
+        run: |
+          echo '${{ secrets.GITHUB_TOKEN }}' \
+            | helm registry login ghcr.io -u '${{ github.actor }}' --password-stdin
+
+      # `helm push` overwrites an existing tag without a word, and every push to
+      # main that touches the chart runs this job. Checking first is what turns
+      # "publish on merge" into "publish when the version is bumped", and it
+      # keeps an already-consumed version immutable.
+      - name: Skip if published
+        id: exists
+        run: |
+          V='${{ steps.chart.outputs.version }}'
+          if helm show chart "$OCI_REPO/jellyfin-pdb-controller" --version "$V" >/dev/null 2>&1; then
+            echo "version $V is already in the registry -- nothing to do."
+            echo "published=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "published=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Package and push
+        if: steps.exists.outputs.published == 'false'
+        run: |
+          helm package "$CHART_DIR" -d /tmp/chart
+          helm push "/tmp/chart/jellyfin-pdb-controller-${{ steps.chart.outputs.version }}.tgz" "$OCI_REPO"
+
+      - name: Summary
+        run: |
+          V='${{ steps.chart.outputs.version }}'
+          if [ '${{ steps.exists.outputs.published }}' = 'true' ]; then
+            echo "Chart \`$V\` was already published -- skipped." >>"$GITHUB_STEP_SUMMARY"
+          else
+            echo "Pushed \`$OCI_REPO/jellyfin-pdb-controller:$V\`." >>"$GITHUB_STEP_SUMMARY"
+          fi

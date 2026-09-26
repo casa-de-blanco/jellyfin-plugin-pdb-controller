@@ -1,0 +1,20 @@
+---
+apiVersion: v2
+name: jellyfin-pdb-controller
+description: The PodDisruptionBudget and RBAC the PDB Controller Jellyfin plugin needs to do its job
+type: application
+# The chart versions independently of the plugin: the manifests below change
+# far less often than the DLL does.
+version: 0.1.0
+appVersion: "0.1.1.0"
+# unhealthyPodEvictionPolicy is beta and on by default from 1.27.
+kubeVersion: ">=1.27.0-0"
+keywords:
+  - jellyfin
+  - poddisruptionbudget
+  - drain
+home: https://github.com/casa-de-blanco/jellyfin-plugin-pdb-controller
+sources:
+  - https://github.com/casa-de-blanco/jellyfin-plugin-pdb-controller
+maintainers:
+  - name: casa-de-blanco
