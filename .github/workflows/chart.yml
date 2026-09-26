@@ -20,7 +20,9 @@ env:
 
 concurrency:
   group: chart-${{ github.ref }}
-  cancel-in-progress: true
+  # PR runs are disposable; a main run is not -- cancelling one mid-`helm push`
+  # is how a half-written tag happens.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   lint:
